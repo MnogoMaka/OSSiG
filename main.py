@@ -15,18 +15,19 @@ from PIL import Image
 import zipfile
 import shutil
 from ultralytics import YOLO
+from dotenv import load_dotenv
 import os
 from pathlib import Path
 
 app = FastAPI()
 
-API_URL = "http://localhost:9999/api/request"
+API_URL = os.getenv("API_URL")
+if not API_URL:
+    raise RuntimeError("API_URL не задан в .env файле")
 TEMP_DIR = Path("temp")
 TEMP_DIR.mkdir(exist_ok=True)
 MAX_IMAGE_SIZE = (1024, 1024)
 
-
-# Models configuration
 MODELS = {
     "sootv": YOLO("models/z1/sootv.pt"),
     "cld": YOLO('models/z2/clear_dirt.pt'),
@@ -62,7 +63,7 @@ class FraudImageResponse(BaseModel):
 
 
 def download_image(url: HttpUrl) -> Image.Image:
-    """Download and validate image from URL"""
+
     response = requests.get(url, timeout=80)
     response.raise_for_status()
 
@@ -72,7 +73,7 @@ def download_image(url: HttpUrl) -> Image.Image:
 
 
 def process_detection(model_key: str, image: Image.Image) -> dict:
-    """Generic model prediction processing"""
+
     model = MODELS[model_key]
     results = model.predict(image)
 
@@ -88,7 +89,7 @@ def process_detection(model_key: str, image: Image.Image) -> dict:
 
 @app.post("/task/accordance", response_model=ImageResponse)
 async def process_accordance(request: ImageRequest):
-    """Process vehicle compliance check"""
+
     try:
         image = download_image(request.photo_url)
         prediction = process_detection("sootv", image)
@@ -105,10 +106,9 @@ async def process_accordance(request: ImageRequest):
             results={"error": str(e)}
         )
 
-
 @app.post("/task/cargo", response_model=ImageResponse)
 async def process_cargo(request: ImageRequest):
-    """Process cargo cleanliness check"""
+
     try:
         image = download_image(request.photo_url)
         prediction = process_detection("cld", image)
@@ -125,10 +125,9 @@ async def process_cargo(request: ImageRequest):
             results={"error": str(e)}
         )
 
-
 @app.post("/task/pollution", response_model=ImageResponse)
 async def process_pollution(request: ImageRequest):
-    """Process vehicle pollution check"""
+
     try:
         image = download_image(request.photo_url)
         detection_results = MODELS["det_car"].predict(image)
@@ -159,18 +158,15 @@ async def process_pollution(request: ImageRequest):
             results={"error": str(e)}
         )
 
-
 def process_zip_archive(zip_path: Path) -> List[Dict]:
-    """Обработка результатов из ZIP-архива"""
-    results = []
 
+    results = []
     with tempfile.TemporaryDirectory() as tmp_dir:
         try:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 if "report.xlsx" not in zip_ref.namelist():
                     raise FileNotFoundError("Файл отчета не найден")
 
-                # Извлекаем и читаем Excel с указанием кодировки
                 zip_ref.extract("report.xlsx", tmp_dir)
                 df = pd.read_excel(
                     Path(tmp_dir) / "report.xlsx",
@@ -178,7 +174,6 @@ def process_zip_archive(zip_path: Path) -> List[Dict]:
                     dtype={"race_id": str, "fraud_descr": str},
                 )
 
-                # Заменяем NaN на None
                 df = df.where(pd.notnull(df), None)
 
                 # Формируем результат
@@ -194,7 +189,6 @@ def process_zip_archive(zip_path: Path) -> List[Dict]:
             raise ValueError(f"Ошибка обработки архива: {str(e)}") from e
 
     return results
-
 
 def normalize_status(status: str):
     if status is None:
@@ -223,7 +217,6 @@ def normalize_status(status: str):
         pass
 
     return status
-
 
 @app.post("/task/fraud", response_model=FraudImageResponse)
 async def process_fraud(request: FraudImageRequest):
@@ -265,10 +258,10 @@ async def process_fraud(request: FraudImageRequest):
         # Создаем ZIP-архив с сохранением структуры папок
         zip_path = temp_dir.with_suffix('.zip')
         shutil.make_archive(
-            base_name=str(temp_dir),  # Базовое имя без расширения
-            format='zip',              # Формат архива
-            root_dir=str(temp_dir),    # Корневая директория для архива
-            base_dir='photos'          # Относительный путь к упаковываемой папке
+            base_name=str(temp_dir),
+            format='zip',
+            root_dir=str(temp_dir),
+            base_dir='photos'
         )
 
         # Отправляем архив
