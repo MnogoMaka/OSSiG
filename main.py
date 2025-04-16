@@ -21,9 +21,17 @@ models = {
 }
 # Определяем структуру запросов
 class ImageRequest(BaseModel):
-    parameters: dict
+    photo_url: str
     timestamp: datetime
     status: str
+    trip_time: datetime
+    trip_number: str
+class FraudImageRequest(BaseModel):
+    photo_list: str
+    timestamp: datetime
+    status: str
+    trip_time: datetime
+    trip_number: str
 # Определяем структуру ответа
 class ImageResponse(BaseModel):
     command_id: str
@@ -38,57 +46,132 @@ def load_image(photo_url: str):
     else:
         raise HTTPException(status_code=400, detail="Ошибка загрузки изображения")
 # Функция для обработки задачи
-def process_task(task_type: str, image, parameters: dict):
-    if task_type == "accordance" :
-        try:
-            response = requests.get(image)
-            response.raise_for_status()
-            image_c = Image.open(BytesIO(response.content))
-            results = models["sootv"].predict(image_c)
-            probs = results[0].probs
-            pred_class_id = probs.top1
-            confidence = probs.top1conf.item()
-            label = results[0].names[int(pred_class_id)]
-        except Exception as e:
-            return {"error": str(e)}
-        return {"answer": label, "confidence": confidence}
-    elif task_type == "cargo":
-        try:
-            response = requests.get(image)
-            response.raise_for_status()
-            image_c = Image.open(BytesIO(response.content))
-            results = models["cld"].predict(image_c)
-            probs = results[0].probs
-            pred_class_id = probs.top1
-            confidence = probs.top1conf.item()
-            label = results[0].names[int(pred_class_id)]
-        except Exception as e:
-            return {"error": str(e)}
-        return {"answer": label, "confidence": confidence}
-    elif task_type == "pollution":
-        pass
-    elif task_type == "fraud":
-        pass
-    else:
-        raise HTTPException(status_code=400, detail="Неверный тип задачи")
-# Эндпоинт для обработки изображения
-@app.post("/process_image", response_model=ImageResponse)
+@app.post("/task/accordance", response_model=ImageResponse)
 async def process_image(request: ImageRequest):
-    parameters = request.parameters
-    task_type = parameters.get("task_type")
-    photo_url = parameters.get("photo_url")
-    if not task_type or not photo_url:
-        raise HTTPException(status_code=400, detail="Необходимые параметры отсутствуют")
-    # Обрабатываем задачу
-    results = process_task(task_type, photo_url, parameters)
-    # Создаем ответ
+    photo_url = request.get("photo_url")
     command_id = str(uuid.uuid4())
-    response = {
-        "command_id": command_id,
-        "response_status": "success",
-        "results": results
-    }
-    return response
+    if not photo_url:
+        raise HTTPException(status_code=400, detail="Необходимые параметры отсутствуют")
+    try:
+        response = requests.get(photo_url)
+        response.raise_for_status()
+        image_c = Image.open(BytesIO(response.content))
+        results = models["sootv"].predict(image_c)
+        probs = results[0].probs
+        pred_class_id = probs.top1
+        confidence = probs.top1conf.item()
+        label = results[0].names[int(pred_class_id)]
+        results =  {"answer": label, "confidence": confidence}
+
+        response = {
+            "command_id": command_id,
+            "response_status": "success",
+            "results": results
+        }
+        return response
+    except Exception as e:
+        response = {
+            "command_id": command_id,
+            "response_status": 'Error',
+            "results": {"error": str(e)}
+        }
+        return response
+
+
+@app.post("/task/cargo", response_model=ImageResponse)
+async def process_image(request: ImageRequest):
+    photo_url = request.get("photo_url")
+    command_id = str(uuid.uuid4())
+    if not photo_url:
+        raise HTTPException(status_code=400, detail="Необходимые параметры отсутствуют")
+    try:
+        response = requests.get(photo_url)
+        response.raise_for_status()
+        image_c = Image.open(BytesIO(response.content))
+        results = models["cld"].predict(image_c)
+        probs = results[0].probs
+        pred_class_id = probs.top1
+        confidence = probs.top1conf.item()
+        label = results[0].names[int(pred_class_id)]
+        results = {"answer": label, "confidence": confidence}
+
+        response = {
+            "command_id": command_id,
+            "response_status": "success",
+            "results": results
+        }
+        return response
+    except Exception as e:
+        response = {
+            "command_id": command_id,
+            "response_status": 'Error',
+            "results": {"error": str(e)}
+        }
+        return response
+
+@app.post("/task/pollution", response_model=ImageResponse)
+async def process_image(request: ImageRequest):
+    photo_url = request.get("photo_url")
+    command_id = str(uuid.uuid4())
+    if not photo_url:
+        raise HTTPException(status_code=400, detail="Необходимые параметры отсутствуют")
+    try:
+        response = requests.get(photo_url)
+        response.raise_for_status()
+        image_c = Image.open(BytesIO(response.content))
+        results = models['det_car'](image_c)
+        if len(results[0].boxes) > 0:
+            img = cv2.imread(image_c)
+            best_box = max(results[0].boxes, key=lambda box: box.conf.item())
+            x1, y1, x2, y2 = map(int, best_box.xyxy[0])
+            cropped_img = img[y1:y2, x1:x2]
+            results = models['cls_grz'].predict(cropped_img)
+            probs = results[0].probs
+            pred_class_id = probs.top1
+            confidence = probs.top1conf.item()
+            label = results[0].names[int(pred_class_id)]
+            results = {"answer": label, "confidence": confidence}
+
+            response = {
+                "command_id": command_id,
+                "response_status": "success",
+                "results": results
+            }
+            return response
+        else:
+            response = {
+                "command_id": command_id,
+                "response_status": 'Error',
+                "results": {"error": 'The car was not detected'}
+            }
+            return response
+    except Exception as e:
+        response = {
+            "command_id": command_id,
+            "response_status": 'Error',
+            "results": {"error": str(e)}
+        }
+        return response
+# Эндпоинт для обработки изображения
+@app.post("/task/fraud", response_model=ImageResponse)
+async def process_image(request: ImageRequest):
+    photos_url = request.get("photo_list")
+    command_id = str(uuid.uuid4())
+    if not photos_url:
+        raise HTTPException(status_code=400, detail="Необходимые параметры отсутствуют")
+    try:
+        for photos in photos_url:
+            photos_in = photos.get('photo_numberplate_IN')
+            photos_out = photos.get('photo_numberplate_OUT')
+            response = requests.get(photos)
+            response.raise_for_status()
+    except Exception as e:
+        response = {
+            "command_id": command_id,
+            "response_status": 'Error',
+            "results": {"error": str(e)}
+        }
+        return response
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
