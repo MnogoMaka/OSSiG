@@ -1,3 +1,4 @@
+from dotenv import load_dotenv
 import uuid
 import tempfile
 from typing import Dict, List
@@ -15,10 +16,10 @@ from PIL import Image
 import zipfile
 import shutil
 from ultralytics import YOLO
-from dotenv import load_dotenv
 import os
 from pathlib import Path
 
+load_dotenv()
 app = FastAPI()
 
 API_URL = os.getenv("API_URL")
