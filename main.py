@@ -107,8 +107,8 @@ async def process_accordance(request: ImageRequest):
             results={"error": str(e)}
         )
 
-@app.post("/task/cargo", response_model=ImageResponse)
-async def process_cargo(request: ImageRequest):
+@app.post("/task/pollution", response_model=ImageResponse)
+async def process_pollution(request: ImageRequest):
 
     try:
         image = download_image(request.photo_url)
@@ -126,8 +126,8 @@ async def process_cargo(request: ImageRequest):
             results={"error": str(e)}
         )
 
-@app.post("/task/pollution", response_model=ImageResponse)
-async def process_pollution(request: ImageRequest):
+@app.post("/task/cargo", response_model=ImageResponse)
+async def process_cargo(request: ImageRequest):
 
     try:
         image = download_image(request.photo_url)
