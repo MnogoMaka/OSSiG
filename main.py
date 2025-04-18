@@ -139,11 +139,9 @@ async def process_cargo(request: ImageRequest):
         best_box = max(detection_results[0].boxes, key=lambda b: b.conf.item())
         x1, y1, x2, y2 = map(int, best_box.xyxy[0])
 
-        # Convert PIL Image to OpenCV format
         cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
         cropped = cv_image[y1:y2, x1:x2]
 
-        # Convert back to PIL Image for classification
         classification_image = Image.fromarray(cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB))
         prediction = process_detection("cls_grz", classification_image)
 
