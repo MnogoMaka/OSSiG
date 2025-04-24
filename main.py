@@ -18,9 +18,18 @@ import shutil
 from ultralytics import YOLO
 import os
 from pathlib import Path
+from typing import List
+from fastapi.middleware.cors import CORSMiddleware
+
 
 load_dotenv()
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 API_URL = os.getenv("API_URL")
 if not API_URL:
@@ -45,9 +54,15 @@ class ImageRequest(BaseModel):
     trip_time: datetime
     trip_number: str
 
+class FraudData(BaseModel):
+    trip_number: str
+    trip_datetime: str
+    car_number: str
+    photo_numberplate_IN: HttpUrl
+    photo_numberplate_OUT: HttpUrl
 
 class FraudImageRequest(BaseModel):
-    photo_list: list
+    photo_list: List[FraudData]
     timestamp: datetime
     status: str
 
@@ -227,32 +242,35 @@ async def process_fraud(request: FraudImageRequest):
 
     try:
         # Скачиваем и сохраняем изображения
+        #print(request.photo_list)
         for photo_data in request.photo_list:
+            #print(photo_data)
             for photo_type in ['photo_numberplate_IN', 'photo_numberplate_OUT']:
-                if photo_type not in photo_data:
+                if not hasattr(photo_data, photo_type):
+                    #print(f"Attribute '{photo_type}' not found in {photo_data}")  # Сообщение об отсутствии атрибута
                     continue
 
                 # Скачиваем изображение по URL
                 try:
-                    response = requests.get(photo_data[photo_type], timeout=80)
+                    value = getattr(photo_data, photo_type)
+                    response = requests.get(value, timeout=10)
                     response.raise_for_status()
                     image_data = response.content
+                    # Формируем имя файла
+                    filename = (
+                        f"{getattr(photo_data, 'trip_number')}_"
+                        f"{getattr(photo_data, 'car_number')}_"
+                        f"{getattr(photo_data, 'trip_datetime').replace(':', '_')}_"
+                        f"{'_'.join(photo_type.split('_')[1:])}.jpg"
+                    )
+                    # Сохраняем в подпапку photos
+                    with open(photos_dir / filename, 'wb') as file:
+                        file.write(image_data)
                 except Exception as e:
                     raise HTTPException(
                         status_code=400,
                         detail=f"Ошибка загрузки {photo_type}: {str(e)}"
                     )
-
-                # Формируем имя файла
-                filename = (
-                    f"{photo_data['trip_number']}_"
-                    f"{photo_data['car_number']}_"
-                    f"{photo_data['trip_datetime'].replace(':', '_')}_"
-                    f"{"_".join(photo_type.split('_')[1:])}.jpg"
-                )
-
-                # Сохраняем в подпапку photos
-                (photos_dir / filename).write_bytes(image_data)
 
         # Создаем ZIP-архив с сохранением структуры папок
         zip_path = temp_dir.with_suffix('.zip')
@@ -278,7 +296,7 @@ async def process_fraud(request: FraudImageRequest):
 
         fraud_results = process_zip_archive(result_zip)
         fraud_status = any(
-            "Мошенничество" in str(res["status"]) or
+            "мошенничество" in str(res["status"]) or
             "Машины различаются" in str(res["status"])
             for res in fraud_results
         )
