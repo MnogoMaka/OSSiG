@@ -62,9 +62,11 @@ class FraudData(BaseModel):
     photo_numberplate_OUT: HttpUrl
 
 class FraudImageRequest(BaseModel):
-    photo_list: List[FraudData]
+    trip_check: str
     timestamp: datetime
     status: str
+    photo_list: List[FraudData]
+
 
 
 class ImageResponse(BaseModel):
@@ -75,6 +77,7 @@ class ImageResponse(BaseModel):
 
 class FraudImageResponse(BaseModel):
     response_status: str
+    trip_check: str
     results: dict
 
 
@@ -172,8 +175,8 @@ async def process_cargo(request: ImageRequest):
             results={"error": str(e)}
         )
 
-def process_zip_archive(zip_path: Path) -> List[Dict]:
 
+def process_zip_archive(zip_path: Path, trip_check: str):
     results = []
     with tempfile.TemporaryDirectory() as tmp_dir:
         try:
@@ -188,49 +191,36 @@ def process_zip_archive(zip_path: Path) -> List[Dict]:
                     dtype={"race_id": str, "fraud_descr": str},
                 )
 
+                # Заменяем NaN на None и фильтруем данные
                 df = df.where(pd.notnull(df), None)
+                #print(1, df)
+                mask = (
+                    (df['filename1'].str.contains(trip_check) | df['filename2'].str.contains(trip_check)) &
+                        df['filename2'].str.contains('_IN.npy')
+                )
+                df_filtered = df[mask]
+                #print(2, df_filtered)
+                # Обрабатываем каждую запись
+                for _, row in df_filtered.iterrows():
+                    if trip_check in row.get('filename2', ''):
+                        filename = row.get('filename1', '')
+                    else:
+                        filename = row.get('filename2', '')
+                    number = filename.split('_')[0] if filename else None
+                    #print(number)
+                    fraud_descr = row.get('fraud_descr')
+                    # Уточняем проверку для строк с пробелами
+                    value = 0 if pd.isna(fraud_descr) or str(fraud_descr).strip() == '' else fraud_descr
 
-                # Формируем результат
-                results = [
-                    {
-                        "trip_number": str(row["race_id"]),
-                        "status": row["fraud_descr"] if row["fraud_descr"] else None
-                    }
-                    for _, row in df.iterrows()
-                ]
+                    if number:
+                        d = {'trip_number': number, 'status': value}
+                        results.append(d)
 
         except Exception as e:
             raise ValueError(f"Ошибка обработки архива: {str(e)}") from e
 
     return results
 
-def normalize_status(status: str):
-    if status is None:
-        return None
-
-    # Список ожидаемых статусов
-    expected_statuses = {
-        "possible_fraud": "Возможно мошенничество",
-        "different_cars": "Машины различаются"
-    }
-
-    # Проверка на прямой текст
-    if status in expected_statuses.values():
-        return status
-
-    # Проверка на английские варианты
-    if status in expected_statuses:
-        return expected_statuses[status]
-
-    # Декодирование Unicode escape
-    try:
-        decoded = status.encode('latin-1').decode('unicode-escape')
-        if decoded in expected_statuses.values():
-            return decoded
-    except:
-        pass
-
-    return status
 
 @app.post("/task/fraud", response_model=FraudImageResponse)
 async def process_fraud(request: FraudImageRequest):
@@ -293,26 +283,23 @@ async def process_fraud(request: FraudImageRequest):
         # Обработка результата
         result_zip = TEMP_DIR / f"result_{uuid.uuid4().hex}.zip"
         result_zip.write_bytes(api_response.content)
+        #print(getattr(request, 'trip_check'))
+        fraud_results = process_zip_archive(result_zip, trip_check=getattr(request, 'trip_check'))
+        fraud_status = False if set([i.get('status') for i in fraud_results]) == {0} else True
 
-        fraud_results = process_zip_archive(result_zip)
-        fraud_status = any(
-            "мошенничество" in str(res["status"]) or
-            "Машины различаются" in str(res["status"])
-            for res in fraud_results
-        )
-        for res in fraud_results:
-            res["status"] = normalize_status(res["status"])
         print(FraudImageResponse(
             response_status="success",
+            trip_check=request.trip_check,
             results={
-                "query_status": fraud_status,
+                "fraud_status": fraud_status,
                 "results": fraud_results
             }
         ))
         return FraudImageResponse(
             response_status="success",
+            trip_check=request.trip_check,
             results={
-                "query_status": fraud_status,
+                "fraud_status": fraud_status,
                 "results": fraud_results
             }
         )
@@ -320,6 +307,7 @@ async def process_fraud(request: FraudImageRequest):
     except Exception as e:
         return FraudImageResponse(
             response_status="error",
+            trip_check=request.trip_check,
             results={"error": str(e)}
         )
     finally:
