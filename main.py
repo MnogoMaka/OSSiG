@@ -194,19 +194,11 @@ def process_zip_archive(zip_path: Path, trip_check: str):
                 # Заменяем NaN на None и фильтруем данные
                 df = df.where(pd.notnull(df), None)
                 #print(1, df)
-                mask = (
-                    (df['filename1'].str.contains(trip_check) | df['filename2'].str.contains(trip_check)) &
-                        df['filename2'].str.contains('_IN.npy')
-                )
-                df_filtered = df[mask]
                 #print(2, df_filtered)
                 # Обрабатываем каждую запись
-                for _, row in df_filtered.iterrows():
-                    if trip_check in row.get('filename2', ''):
-                        filename = row.get('filename1', '')
-                    else:
-                        filename = row.get('filename2', '')
-                    number = filename.split('_')[0] if filename else None
+                for _, row in df.iterrows():
+                    filename = row.get('filename2', '')
+                    number = filename.split(',')[0] if filename else None
                     #print(number)
                     fraud_descr = row.get('fraud_descr')
                     # Уточняем проверку для строк с пробелами
@@ -225,14 +217,23 @@ def process_zip_archive(zip_path: Path, trip_check: str):
 @app.post("/task/fraud", response_model=FraudImageResponse)
 async def process_fraud(request: FraudImageRequest):
     temp_dir = TEMP_DIR / uuid.uuid4().hex
-    photos_dir = temp_dir / "photos"  # Основная папка для фотографий
-    photos_dir.mkdir(parents=True, exist_ok=True)
+    photos_dir_all = temp_dir / "any"  # Основная папка для фотографий
+    photos_dir_one = temp_dir / "main_trip"
+    photos_dir_all.mkdir(parents=True, exist_ok=True)
+    photos_dir_one.mkdir(parents=True, exist_ok=True)
     zip_path = None
     result_zip = None
 
     try:
         # Скачиваем и сохраняем изображения
         #print(request.photo_list)
+        names = [d.trip_number for d in request.photo_list]
+        if request.trip_check not in names:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Отсутствует искомый рейс {request.trip_check}"
+            )
+
         for photo_data in request.photo_list:
             #print(photo_data)
             for photo_type in ['photo_numberplate_IN', 'photo_numberplate_OUT']:
@@ -254,8 +255,16 @@ async def process_fraud(request: FraudImageRequest):
                         f"{'_'.join(photo_type.split('_')[1:])}.jpg"
                     )
                     # Сохраняем в подпапку photos
-                    with open(photos_dir / filename, 'wb') as file:
-                        file.write(image_data)
+
+
+                    if request.trip_check == photo_data.trip_number:
+                        if 'OUT' in filename:
+                            continue
+                        with open(photos_dir_one / filename, 'wb') as file:
+                            file.write(image_data)
+                    else:
+                        with open(photos_dir_all / filename, 'wb') as file:
+                            file.write(image_data)
                 except Exception as e:
                     raise HTTPException(
                         status_code=400,
@@ -263,22 +272,48 @@ async def process_fraud(request: FraudImageRequest):
                     )
 
         # Создаем ZIP-архив с сохранением структуры папок
-        zip_path = temp_dir.with_suffix('.zip')
+        zip_path1 = photos_dir_one.with_suffix('.zip')
+        zip_path2 = photos_dir_all.with_suffix('.zip')
         shutil.make_archive(
-            base_name=str(temp_dir),
+            base_name=str(photos_dir_one),
             format='zip',
             root_dir=str(temp_dir),
-            base_dir='photos'
+            base_dir='main_trip'
         )
-
+        shutil.make_archive(
+            base_name=str(photos_dir_all),
+            format='zip',
+            root_dir=str(temp_dir),
+            base_dir='any'
+        )
         # Отправляем архив
-        with zip_path.open('rb') as f:
+        for path in [zip_path1, zip_path2]:
+            if not path.exists() or path.stat().st_size == 0:
+                raise HTTPException(status_code=500, detail=f"Архив {path} не создан или пуст")
+        # Отправка на API
+        with zip_path1.open('rb') as f_relations, zip_path2.open('rb') as f_main:
+            files = {
+                # ✅ Используем только имя файла, без пути
+                "file": (zip_path2.name, f_main, 'application/zip'),  # Основной архив
+                "relations_file": (zip_path1.name, f_relations, 'application/zip')  # Архив для сравнения
+            }
+
+            data = {
+                "strategy_type": "in-in (m)",
+                "threshold": "30"
+            }
+
             api_response = requests.post(
                 API_URL,
-                files={"file": (f"photos_{zip_path.name}", f)},
-                timeout=8000
+                files=files,
+                data=data,
+                timeout=8000  # ← Уменьшаем до 8 секунд
             )
             api_response.raise_for_status()
+
+            print("Запрос успешен. Ответ:", api_response.status_code)
+            if "application/zip" not in api_response.headers.get("Content-Type", ""):
+                raise Exception(f"API вернул ошибку: {api_response.text}")
 
         # Обработка результата
         result_zip = TEMP_DIR / f"result_{uuid.uuid4().hex}.zip"
@@ -314,8 +349,6 @@ async def process_fraud(request: FraudImageRequest):
         # Очистка ресурсов
         try:
             shutil.rmtree(temp_dir, ignore_errors=True)
-            if zip_path and zip_path.exists():
-                zip_path.unlink()
             if result_zip and result_zip.exists():
                 result_zip.unlink()
         except Exception as cleanup_error:
