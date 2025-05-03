@@ -240,7 +240,6 @@ async def process_fraud(request: FraudImageRequest):
                 if not hasattr(photo_data, photo_type):
                     #print(f"Attribute '{photo_type}' not found in {photo_data}")  # Сообщение об отсутствии атрибута
                     continue
-
                 # Скачиваем изображение по URL
                 try:
                     value = getattr(photo_data, photo_type)
@@ -254,9 +253,7 @@ async def process_fraud(request: FraudImageRequest):
                         f"{getattr(photo_data, 'trip_datetime').replace(':', '_')}_"
                         f"{'_'.join(photo_type.split('_')[1:])}.jpg"
                     )
-                    # Сохраняем в подпапку photos
-
-
+                    # Сохраняем в подпапку
                     if request.trip_check == photo_data.trip_number:
                         if 'OUT' in filename:
                             continue
@@ -271,7 +268,7 @@ async def process_fraud(request: FraudImageRequest):
                         detail=f"Ошибка загрузки {photo_type}: {str(e)}"
                     )
 
-        # Создаем ZIP-архив с сохранением структуры папок
+        # Создаем ZIP-архивы с сохранением структуры папок
         zip_path1 = photos_dir_one.with_suffix('.zip')
         zip_path2 = photos_dir_all.with_suffix('.zip')
         shutil.make_archive(
@@ -286,14 +283,14 @@ async def process_fraud(request: FraudImageRequest):
             root_dir=str(temp_dir),
             base_dir='any'
         )
-        # Отправляем архив
+
         for path in [zip_path1, zip_path2]:
             if not path.exists() or path.stat().st_size == 0:
                 raise HTTPException(status_code=500, detail=f"Архив {path} не создан или пуст")
-        # Отправка на API
+
         with zip_path1.open('rb') as f_relations, zip_path2.open('rb') as f_main:
             files = {
-                # ✅ Используем только имя файла, без пути
+
                 "file": (zip_path2.name, f_main, 'application/zip'),  # Основной архив
                 "relations_file": (zip_path1.name, f_relations, 'application/zip')  # Архив для сравнения
             }
@@ -307,7 +304,7 @@ async def process_fraud(request: FraudImageRequest):
                 API_URL,
                 files=files,
                 data=data,
-                timeout=8000  # ← Уменьшаем до 8 секунд
+                timeout=8000  #
             )
             api_response.raise_for_status()
 
