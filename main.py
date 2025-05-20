@@ -83,7 +83,7 @@ class FraudImageResponse(BaseModel):
 
 def download_image(url: HttpUrl) -> Image.Image:
 
-    response = requests.get(url, timeout=80)
+    response = requests.get(url, timeout=80, verify=False)
     response.raise_for_status()
 
     image = Image.open(BytesIO(response.content))
@@ -243,7 +243,7 @@ async def process_fraud(request: FraudImageRequest):
                 # Скачиваем изображение по URL
                 try:
                     value = getattr(photo_data, photo_type)
-                    response = requests.get(value, timeout=10)
+                    response = requests.get(value, timeout=10, verify=False)
                     response.raise_for_status()
                     image_data = response.content
                     # Формируем имя файла
