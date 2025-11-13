@@ -26,27 +26,48 @@ def test_pollution():
 
 
 def test_fraud():
-    # Тестовые данные с временными метками в UTC
     fraud_data = {
+        "trip_check": "111111111111",
+        "timestamp": "2025-11-12T13:29:37.262Z",
+        "status": "pending",
         "photo_list": [
             {
                 "trip_number": "111111111111",
-                "trip_datetime": '2023_07_18_19_24_25',
+                "trip_datetime": "2023_07_18_19_24_25",
                 "car_number": "A123BC123797",
                 "photo_numberplate_IN": "https://ossig.smart.mos.ru/backup/kpts3/2376b233-193a-45d6-b068-5ffd873e6602/numberplate.jpg",
                 "photo_numberplate_OUT": "https://ossig.smart.mos.ru/backup/kpts3/de507c21-1029-4a94-8f0b-6058a65f31ad/numberplate.jpg"
             },
             {
                 "trip_number": "222222222222",
-                "trip_datetime": '2023_07_18_19_24_30',
+                "trip_datetime": "2023_07_18_19_24_25",
                 "car_number": "A123BC123797",
                 "photo_numberplate_IN": "https://ossig.smart.mos.ru/backup/kpts3/89180804-8040-425c-81db-4f44d21302a8/numberplate.jpg",
                 "photo_numberplate_OUT": "https://ossig.smart.mos.ru/backup/kpts3/fc05caa9-34a2-48a9-a8d3-2742ebd7c555/numberplate.jpg"
             }
-        ],
-        "timestamp": datetime.now(UTC).isoformat(),
-        "status": "test"
+        ]
     }
+    # Тестовые данные с временными метками в UTC
+    # fraud_data = {
+    #     "photo_list": [
+    #         {
+    #             "trip_number": "111111111111",
+    #             "trip_datetime": '2023_07_18_19_24_25',
+    #             "car_number": "A123BC123797",
+    #             "photo_numberplate_IN": "https://ossig.smart.mos.ru/backup/kpts3/2376b233-193a-45d6-b068-5ffd873e6602/numberplate.jpg",
+    #             "photo_numberplate_OUT": "https://ossig.smart.mos.ru/backup/kpts3/de507c21-1029-4a94-8f0b-6058a65f31ad/numberplate.jpg"
+    #         },
+    #         {
+    #             "trip_number": "222222222222",
+    #             "trip_datetime": '2023_07_18_19_24_30',
+    #             "car_number": "A123BC123797",
+    #             "photo_numberplate_IN": "https://ossig.smart.mos.ru/backup/kpts3/89180804-8040-425c-81db-4f44d21302a8/numberplate.jpg",
+    #             "photo_numberplate_OUT": "https://ossig.smart.mos.ru/backup/kpts3/fc05caa9-34a2-48a9-a8d3-2742ebd7c555/numberplate.jpg"
+    #         }
+    #     ],
+    #     "timestamp": datetime.now(UTC).isoformat(),
+    #     "status": "test"
+    # }
 
     try:
         res = requests.post(f"{BASE}/task/fraud", json=fraud_data, timeout=8000)

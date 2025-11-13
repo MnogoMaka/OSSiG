@@ -20,6 +20,87 @@ import os
 from pathlib import Path
 from typing import List
 from fastapi.middleware.cors import CORSMiddleware
+import logging
+from logging.handlers import RotatingFileHandler
+import json
+
+
+# Настройка логирования
+def setup_logging():
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+
+    logger = logging.getLogger("api_logger")
+    logger.setLevel(logging.INFO)
+
+    # Форматирование
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - [%(endpoint)s] - %(message)s'
+    )
+
+    # Файловый обработчик с ротацией
+    file_handler = RotatingFileHandler(
+        'logs/app.log',
+        maxBytes=10 * 1024 * 1024,  # 10MB
+        backupCount=5
+    )
+    file_handler.setFormatter(formatter)
+
+    # Консольный обработчик
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    return logger
+
+
+# Инициализация логгера
+logger = setup_logging()
+
+
+def log_request(endpoint: str, request_data: dict, additional_info: dict = None):
+    """Логирование входящего запроса"""
+    log_data = {
+        "endpoint": endpoint,
+        "request": request_data,
+        "type": "request"
+    }
+    if additional_info:
+        log_data.update(additional_info)
+
+    logger.info(f"Request received", extra={"endpoint": endpoint})
+    logger.debug(f"Request details: {json.dumps(log_data, default=str)}", extra={"endpoint": endpoint})
+
+
+def log_response(endpoint: str, response_data: dict, processing_time: float = None):
+    """Логирование исходящего ответа"""
+    log_data = {
+        "endpoint": endpoint,
+        "response": response_data,
+        "type": "response"
+    }
+    if processing_time is not None:
+        log_data["processing_time_seconds"] = processing_time
+
+    status = response_data.get('response_status', 'unknown')
+    logger.info(f"Response sent - Status: {status}", extra={"endpoint": endpoint})
+    logger.debug(f"Response details: {json.dumps(log_data, default=str)}", extra={"endpoint": endpoint})
+
+
+def log_error(endpoint: str, error: str, details: dict = None):
+    """Логирование ошибок"""
+    error_data = {
+        "endpoint": endpoint,
+        "error": error,
+        "type": "error"
+    }
+    if details:
+        error_data.update(details)
+
+    logger.error(f"Error occurred: {error}", extra={"endpoint": endpoint})
+    logger.error(f"Error details: {json.dumps(error_data, default=str)}", extra={"endpoint": endpoint})
 
 
 load_dotenv()
@@ -54,6 +135,7 @@ class ImageRequest(BaseModel):
     trip_time: datetime
     trip_number: str
 
+
 class FraudData(BaseModel):
     trip_number: str
     trip_datetime: str
@@ -61,12 +143,12 @@ class FraudData(BaseModel):
     photo_numberplate_IN: HttpUrl
     photo_numberplate_OUT: HttpUrl
 
+
 class FraudImageRequest(BaseModel):
     trip_check: str
     timestamp: datetime
     status: str
     photo_list: List[FraudData]
-
 
 
 class ImageResponse(BaseModel):
@@ -82,7 +164,6 @@ class FraudImageResponse(BaseModel):
 
 
 def download_image(url: HttpUrl) -> Image.Image:
-
     response = requests.get(url, timeout=80, verify=False)
     response.raise_for_status()
 
@@ -92,7 +173,6 @@ def download_image(url: HttpUrl) -> Image.Image:
 
 
 def process_detection(model_key: str, image: Image.Image) -> dict:
-
     model = MODELS[model_key]
     results = model.predict(image)
 
@@ -108,46 +188,84 @@ def process_detection(model_key: str, image: Image.Image) -> dict:
 
 @app.post("/task/accordance", response_model=ImageResponse)
 async def process_accordance(request: ImageRequest):
+    start_time = datetime.now()
+    endpoint = "/task/accordance"
 
     try:
+        log_request(endpoint, request.dict(), {"trip_number": request.trip_number})
+
         image = download_image(request.photo_url)
         prediction = process_detection("sootv", image)
 
-        return ImageResponse(
+        response = ImageResponse(
             trip_number=request.trip_number,
             response_status="success",
             results=prediction
         )
+
+        processing_time = (datetime.now() - start_time).total_seconds()
+        log_response(endpoint, response.dict(), processing_time)
+
+        return response
+
     except Exception as e:
-        return ImageResponse(
+        error_response = ImageResponse(
             trip_number=request.trip_number,
             response_status="error",
             results={"error": str(e)}
         )
+
+        log_error(endpoint, str(e), {"trip_number": request.trip_number})
+        processing_time = (datetime.now() - start_time).total_seconds()
+        log_response(endpoint, error_response.dict(), processing_time)
+
+        return error_response
+
 
 @app.post("/task/pollution", response_model=ImageResponse)
 async def process_pollution(request: ImageRequest):
+    start_time = datetime.now()
+    endpoint = "/task/pollution"
 
     try:
+        log_request(endpoint, request.dict(), {"trip_number": request.trip_number})
+
         image = download_image(request.photo_url)
         prediction = process_detection("cld", image)
 
-        return ImageResponse(
+        response = ImageResponse(
             trip_number=request.trip_number,
             response_status="success",
             results=prediction
         )
+
+        processing_time = (datetime.now() - start_time).total_seconds()
+        log_response(endpoint, response.dict(), processing_time)
+
+        return response
+
     except Exception as e:
-        return ImageResponse(
+        error_response = ImageResponse(
             trip_number=request.trip_number,
             response_status="error",
             results={"error": str(e)}
         )
 
+        log_error(endpoint, str(e), {"trip_number": request.trip_number})
+        processing_time = (datetime.now() - start_time).total_seconds()
+        log_response(endpoint, error_response.dict(), processing_time)
+
+        return error_response
+
+
 @app.post("/task/cargo", response_model=ImageResponse)
 async def process_cargo(request: ImageRequest):
+    start_time = datetime.now()
+    endpoint = "/task/cargo"
 
     try:
+        log_request(endpoint, request.dict(), {"trip_number": request.trip_number})
+
         image = download_image(request.photo_url)
         detection_results = MODELS["det_car"].predict(image)
 
@@ -163,17 +281,29 @@ async def process_cargo(request: ImageRequest):
         classification_image = Image.fromarray(cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB))
         prediction = process_detection("cls_grz", classification_image)
 
-        return ImageResponse(
+        response = ImageResponse(
             trip_number=request.trip_number,
             response_status="success",
             results=prediction
         )
+
+        processing_time = (datetime.now() - start_time).total_seconds()
+        log_response(endpoint, response.dict(), processing_time)
+
+        return response
+
     except Exception as e:
-        return ImageResponse(
+        error_response = ImageResponse(
             trip_number=request.trip_number,
             response_status="error",
             results={"error": str(e)}
         )
+
+        log_error(endpoint, str(e), {"trip_number": request.trip_number})
+        processing_time = (datetime.now() - start_time).total_seconds()
+        log_response(endpoint, error_response.dict(), processing_time)
+
+        return error_response
 
 
 def process_zip_archive(zip_path: Path, trip_check: str):
@@ -191,17 +321,12 @@ def process_zip_archive(zip_path: Path, trip_check: str):
                     dtype={"race_id": str, "fraud_descr": str},
                 )
 
-                # Заменяем NaN на None и фильтруем данные
                 df = df.where(pd.notnull(df), None)
-                #print(1, df)
-                #print(2, df_filtered)
-                # Обрабатываем каждую запись
+
                 for _, row in df.iterrows():
                     filename = row.get('filename2', '')
                     number = filename.split(',')[0] if filename else None
-                    #print(number)
                     fraud_descr = row.get('fraud_descr')
-                    # Уточняем проверку для строк с пробелами
                     value = 0 if pd.isna(fraud_descr) or str(fraud_descr).strip() == '' else fraud_descr
 
                     if number:
@@ -216,44 +341,45 @@ def process_zip_archive(zip_path: Path, trip_check: str):
 
 @app.post("/task/fraud", response_model=FraudImageResponse)
 async def process_fraud(request: FraudImageRequest):
-    temp_dir = TEMP_DIR / uuid.uuid4().hex
-    photos_dir_all = temp_dir / "any"  # Основная папка для фотографий
-    photos_dir_one = temp_dir / "main_trip"
-    photos_dir_all.mkdir(parents=True, exist_ok=True)
-    photos_dir_one.mkdir(parents=True, exist_ok=True)
-    zip_path = None
-    result_zip = None
+    start_time = datetime.now()
+    endpoint = "/task/fraud"
 
     try:
-        # Скачиваем и сохраняем изображения
-        #print(request.photo_list)
+        log_request(endpoint, request.dict(), {
+            "trip_check": request.trip_check,
+            "photo_count": len(request.photo_list)
+        })
+
+        temp_dir = TEMP_DIR / uuid.uuid4().hex
+        photos_dir_all = temp_dir / "any"
+        photos_dir_one = temp_dir / "main_trip"
+        photos_dir_all.mkdir(parents=True, exist_ok=True)
+        photos_dir_one.mkdir(parents=True, exist_ok=True)
+        zip_path = None
+        result_zip = None
+
         names = [d.trip_number for d in request.photo_list]
         if request.trip_check not in names:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Отсутствует искомый рейс {request.trip_check}"
-            )
+            error_msg = f"Отсутствует искомый рейс {request.trip_check}"
+            raise HTTPException(status_code=400, detail=error_msg)
 
         for photo_data in request.photo_list:
-            #print(photo_data)
             for photo_type in ['photo_numberplate_IN', 'photo_numberplate_OUT']:
                 if not hasattr(photo_data, photo_type):
-                    #print(f"Attribute '{photo_type}' not found in {photo_data}")  # Сообщение об отсутствии атрибута
                     continue
-                # Скачиваем изображение по URL
                 try:
                     value = getattr(photo_data, photo_type)
                     response = requests.get(value, timeout=10, verify=False)
                     response.raise_for_status()
                     image_data = response.content
-                    # Формируем имя файла
+
                     filename = (
                         f"{getattr(photo_data, 'trip_number')}_"
                         f"{getattr(photo_data, 'car_number')}_"
                         f"{getattr(photo_data, 'trip_datetime').replace(':', '_')}_"
                         f"{'_'.join(photo_type.split('_')[1:])}.jpg"
                     )
-                    # Сохраняем в подпапку
+
                     if request.trip_check == photo_data.trip_number:
                         if 'OUT' in filename:
                             continue
@@ -262,15 +388,14 @@ async def process_fraud(request: FraudImageRequest):
                     else:
                         with open(photos_dir_all / filename, 'wb') as file:
                             file.write(image_data)
-                except Exception as e:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Ошибка загрузки {photo_type}: {str(e)}"
-                    )
 
-        # Создаем ZIP-архивы с сохранением структуры папок
+                except Exception as e:
+                    error_msg = f"Ошибка загрузки {photo_type}: {str(e)}"
+                    raise HTTPException(status_code=400, detail=error_msg)
+
         zip_path1 = photos_dir_one.with_suffix('.zip')
         zip_path2 = photos_dir_all.with_suffix('.zip')
+
         shutil.make_archive(
             base_name=str(photos_dir_one),
             format='zip',
@@ -290,9 +415,8 @@ async def process_fraud(request: FraudImageRequest):
 
         with zip_path1.open('rb') as f_relations, zip_path2.open('rb') as f_main:
             files = {
-
-                "file": (zip_path2.name, f_main, 'application/zip'),  # Основной архив
-                "relations_file": (zip_path1.name, f_relations, 'application/zip')  # Архив для сравнения
+                "file": (zip_path2.name, f_main, 'application/zip'),
+                "relations_file": (zip_path1.name, f_relations, 'application/zip')
             }
 
             data = {
@@ -304,30 +428,22 @@ async def process_fraud(request: FraudImageRequest):
                 API_URL,
                 files=files,
                 data=data,
-                timeout=8000  #
+                timeout=8000
             )
             api_response.raise_for_status()
 
-            print("Запрос успешен. Ответ:", api_response.status_code)
+            logger.info(f"External API call successful: {api_response.status_code}", extra={"endpoint": endpoint})
+
             if "application/zip" not in api_response.headers.get("Content-Type", ""):
                 raise Exception(f"API вернул ошибку: {api_response.text}")
 
-        # Обработка результата
         result_zip = TEMP_DIR / f"result_{uuid.uuid4().hex}.zip"
         result_zip.write_bytes(api_response.content)
-        #print(getattr(request, 'trip_check'))
+
         fraud_results = process_zip_archive(result_zip, trip_check=getattr(request, 'trip_check'))
         fraud_status = False if set([i.get('status') for i in fraud_results]) == {0} else True
 
-        print(FraudImageResponse(
-            response_status="success",
-            trip_check=request.trip_check,
-            results={
-                "fraud_status": fraud_status,
-                "results": fraud_results
-            }
-        ))
-        return FraudImageResponse(
+        response = FraudImageResponse(
             response_status="success",
             trip_check=request.trip_check,
             results={
@@ -336,20 +452,32 @@ async def process_fraud(request: FraudImageRequest):
             }
         )
 
+        processing_time = (datetime.now() - start_time).total_seconds()
+        log_response(endpoint, response.dict(), processing_time)
+
+        return response
+
     except Exception as e:
-        return FraudImageResponse(
+        error_response = FraudImageResponse(
             response_status="error",
             trip_check=request.trip_check,
             results={"error": str(e)}
         )
+
+        log_error(endpoint, str(e), {"trip_check": request.trip_check})
+        processing_time = (datetime.now() - start_time).total_seconds()
+        log_response(endpoint, error_response.dict(), processing_time)
+
+        return error_response
+
     finally:
-        # Очистка ресурсов
         try:
             shutil.rmtree(temp_dir, ignore_errors=True)
             if result_zip and result_zip.exists():
                 result_zip.unlink()
         except Exception as cleanup_error:
-            print(f"Ошибка очистки: {cleanup_error}")
+            logger.error(f"Cleanup error: {cleanup_error}", extra={"endpoint": endpoint})
+
 
 if __name__ == "__main__":
     import uvicorn
